@@ -1,3 +1,19 @@
+/*
+ * kkClave 
+ *    Open source yourgurt incubator: assumes arduino mega 2560, relay 
+ *    shield, ethernet shield, Adafruit_SSD1306 on i2c
+ * https://github.com/cdyn/kkClave
+ * 
+ * Jean Runnells
+ * https://www.customdyn.com
+ * 
+ * TODO:
+ *  - implement ethernet
+ *  - add cooling cycle features
+ *  - handle clock overflow
+ *  - stby, 
+ */
+
 #include <SPI.h>
 #include <Wire.h>
 #include <Ethernet.h>
@@ -47,7 +63,7 @@ static const int PROGMEM s1_d = 25;
 static const int PROGMEM s2_d = 26;
 static const int PROGMEM s3_d = 27;
 
-//state variables
+//IO states
 THERMISTOR t0(t0_a,        // Analog pin
               10000,       // Nominal resistance at 25 ºC
               3950,        // thermistor's beta coefficient
@@ -56,27 +72,32 @@ THERMISTOR t1(t1_a,        // Analog pin
               10000,       // Nominal resistance at 25 ºC
               3950,        // thermistor's beta coefficient
               10000);      // Value of the series resistor
-int c0 = 0;
-int s0 = 0;//start
-int s1 = 0;//mode
-int s2 = 0;//add
-int s3 = 0;//dec
-bool r1 = 0;//light
-bool r2 = 0;//fan
-bool r3 = 0;//heater
-int start = 0;
-int mode =0;
-float temp = 0;
-float set_temp = 50; //default 50 degree C set temp
-float threshold = 2; // +- 2 degree heater on off threshold
-float fanThresh = 3; // temp 
-unsigned long run_time = 21600000; // default 6 hr runtime
-unsigned long start_time = 0;
-unsigned long end_time = 0;
-unsigned long stby = millis();
-unsigned long lastPres = 0;
-void setup() {
-  
+int _t0 = 0; //themistor0 1/10 ºC
+int _t1 = 0; //themistor1 1/10 ºC
+int c0 = 0; //potentiometer (unused)
+int s0 = 0; //start
+int s1 = 0; //mode
+int s2 = 0; //add
+int s3 = 0; //dec
+bool r1 = 0; //light
+bool r2 = 0; //fan
+bool r3 = 0; //heater
+
+//LOGIC vars
+int start = 0; // cycle state: 0=ProgSet 1=ProgRun 2=ProgFin
+int mode = 0; // input state: 0=TempSet 1=TimeSet
+float temp = 0; // ºC computed temp
+float set_temp = 50; // ºC default set temp
+float heat_thresh = 1; // ºC +- threshold for heater start/stop i.e. 'swing'
+float fan_thresh = 3; // ºC thermometer diff threshold for fan start/stop 
+unsigned long run_time = 21600000; // default runtime (6 hr)
+unsigned long inc = 300000; // inc/dec minimum time increment (5 min)
+unsigned long start_time = 0; // cycle start time
+unsigned long end_time = 0; // cycle end time
+unsigned long stby = millis(); // last press for screensaver and race, if 0 device is in standby
+unsigned long race_hold = 500; // inc/dec race delay
+
+void setup() {  
   //start serial
   Serial.begin(9600);
   // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
@@ -120,12 +141,21 @@ void testdrawchar(void) {
   delay(2000);
 }
 
-void stop() {
-  //cycle reset code and cron handler
-  if (start == 0) {
-    if(millis() > stby + 300000){ start = 3;}
-  } else if (start == 1 ){ 
-    if (millis() > end_time) { start = 2;}
+void stop() { // Cycle set code and cron handler
+  if ( start == 0 ) { // cycle start: launch screen saver after delay
+    if(millis() > stby + 300000){ // screen saver delay (5 min)
+      stby = 0;
+      relay();
+      testanimate(logo_bmp, LOGO_WIDTH, LOGO_HEIGHT);
+    } 
+  } else if ( start == 1 ){ // cycle run:  run until end_time
+    if (millis() > end_time) { start = 2; }
+  } else if (start == 2){ // cycle fin: lanunch screensaver after cooldown
+    if(millis() > end_time + 900000 && millis() > stby + 300000){ // screen saver after cooldown (15 min)
+      stby = 0;
+      relay();
+      testanimate(logo_bmp, LOGO_WIDTH, LOGO_HEIGHT);
+    } 
   }
   else {
     
@@ -133,18 +163,23 @@ void stop() {
   //delay(100); //main program delay
 }
 
-void poll() {//524 == 84 deg f 603 == 93 : 79/9 
+void poll() {
   //read sensors
-  //t0 =  analogRead(t0_a);
-  //t1 =  analogRead(t1_a);
   c0 =  analogRead(c0_a);
   s0 =  digitalRead(s0_d);
   s1 =  digitalRead(s1_d);
   s2 =  digitalRead(s2_d);
   s3 =  digitalRead(s3_d);
-  temp = (t0.read() + t1.read()) / 20.0;  //program button pushed delay to wait for release
+  _t0 = t0.read();
+  _t1 = t1.read();
+  temp = (_t0 + _t1) / 20.0;
   //button handlers
   if(s0 == LOW){//Start button
+    if(stby == 0){//wake from standby
+      stby = millis();
+      while(digitalRead(s0_d) == LOW){}
+      return;
+    }
     if(start == 0) {
       start = 1;
       start_time = millis();
@@ -166,10 +201,16 @@ void poll() {//524 == 84 deg f 603 == 93 : 79/9
       end_time = 0;
       start_time = 0;
     }
+    printState();
     stby = millis();
     while(digitalRead(s0_d) == LOW){}
   }
-  if(s1 == LOW){//mode switch
+  if(s1 == LOW){//mode button
+    if(stby == 0){//wake from standby
+      stby = millis();
+      while(digitalRead(s1_d) == LOW){}
+      return;
+    }
     int mset = 0;
     if (mode == 0) {
       mset = 1;
@@ -177,47 +218,96 @@ void poll() {//524 == 84 deg f 603 == 93 : 79/9
       mset = 0;
     } else {mset = 0;}
     mode = mset;
+    printState();
     stby = millis();
     while(digitalRead(s1_d) == LOW){}
   }
-  if(s2 == LOW){//increment
+  if(s2 == LOW){//increment with hold down race
+    if(stby == 0){//wake from standby
+      stby = millis();
+      while(digitalRead(s2_d) == LOW){}
+      return;
+    }
     if(mode == 0) {
       set_temp += 1;
     } else if(mode == 1){
-      run_time += 300000;
-      if (start == 1){end_time += 300000;}
+      run_time += inc;
+      if (start == 1){end_time += inc;}
     }
+    printState();
     stby = millis();
-    while(digitalRead(s2_d) == LOW){}
+    while(digitalRead(s2_d) == LOW){//race on hold
+      if(mode == 1 && millis() - stby > race_hold){
+        stby = millis();
+        run_time += inc * 3;
+        if (start == 1){end_time += inc * 3;}
+        printState();
+      }
+    }
   }
-  if(s3 == LOW){//decrement
+  if(s3 == LOW){//decrement with hold down race
+    if(stby == 0){//wake from standby
+      stby = millis();
+      while(digitalRead(s0_d) == LOW){}
+      return;
+    }
     if(mode == 0) {
       set_temp -= 1;
     } else if(mode == 1){
-      run_time -= 300000;
-      if (start == 1){end_time += 300000;}
+      run_time -= inc;
+      if (start == 1){end_time -= inc;}
     }
+    printState();
     stby = millis();
-    while(digitalRead(s3_d) == LOW){}
+    while(digitalRead(s3_d) == LOW){//race on hold
+      if(mode == 1 && millis() - stby > race_hold){
+        stby = millis();
+        run_time -= inc * 3;
+        if (start == 1){end_time -= inc * 3;}
+        printState();
+      }
+    }
   }
 }
 
-void relay() {
-  if (start != 1){//prograum unstart
+void relay() { // Update relay states
+  float diff = 10.0 * (_t0 - _t1); //thermocouple temp difference in ºC
+  if (start == 0){ //program unstart
+    r1 = 0; // heater
+    r2 = 0; // fan
+    //light
+    if (stby == 0){
+      r3 = 0;
+    } else {
+      r3 = 1;
+    }
+  }
+  else if (start == 1) { //program running
+    // heater on/off with 'swing'
+    if(r1 == 0 && temp < set_temp - heat_thresh){ r1 == 1; }
+    if(r1 == 1 && temp > set_temp + heat_thresh){ r1 = 0; }
+    // fan on/off with temp balance threshold
+    if(abs(diff) > fan_thresh ){ r2 = 1; }
+    else { r2 = 0; }
+    r3 = 1; // light
+  }
+  else if (start == 2){ //program finished
+    r1 == 0;
+    if (stby == 0){ //cooldwon elapsed, standby
+      r2 = 0;
+      r3 = 0;
+    } else { //temp balance with fans during cooldown
+      if(abs(diff) > fan_thresh ){ r2 = 1; }
+      else { r2 = 0; }
+      r3 = 1;
+    }
+  }
+  else { // FAULT! saftey shut off ...
     r1 = 0;
     r2 = 0;
     r3 = 0;
   }
-  else if (temp + threshold < set_temp) { // heater on condition
-    r1 = 1;
-    r2 = 1;
-    r3 = 1;
-  }
-  else { // heater off default condition
-    r1 = 0;
-    r2 = 1;
-    r3 = 1;
-  }
+  
   //set relays
   if(r1) { digitalWrite(r1_d, HIGH); } else { digitalWrite(r1_d, LOW); }
   if(r2) { digitalWrite(r2_d, HIGH); } else { digitalWrite(r2_d, LOW); }
@@ -324,7 +414,7 @@ void testanimate(const uint8_t *bitmap, uint8_t w, uint8_t h) {
     Serial.println(icons[f][DELTAY], DEC);
   }
 
-  while(start == 3) { // Loop until status change
+  while(stby == 0) { // Loop until standby wake
     poll();
     display.clearDisplay(); // Clear the display buffer
 
