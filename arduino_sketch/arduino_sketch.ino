@@ -1,6 +1,6 @@
 /*
  * kkClave 
- *    Open source yourgurt incubator: assumes arduino mega 2560, relay 
+ *    Upcycled Yogurt incubator: assumes arduino mega 2560, relay 
  *    shield, ethernet shield, Adafruit_SSD1306 on i2c
  * https://github.com/cdyn/kkClave
  * 
