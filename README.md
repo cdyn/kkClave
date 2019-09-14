@@ -13,3 +13,5 @@ This is a simple yougurt incubator that uses an arduino mega, a relay shield, an
 *  implement ethernet
 *  add cooling cycle features
 *  handle clock overflow
+
+'[**Custom Dynamics**](https://www.customdyn.com) © [*GNU General Public License v3.0*](https://github.com/cdyn/kkClave/blob/master/LICENSE)'
