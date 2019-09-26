@@ -7,11 +7,13 @@
  * Jean Runnells
  * https://www.customdyn.com
  * 
+ * GNU General Public License v3.0
+ * https://github.com/cdyn/kkClave/blob/master/LICENSE
+ * 
  * TODO:
  *  - implement ethernet
  *  - add cooling cycle features
  *  - handle clock overflow
- *  - stby, 
  */
 
 #include <SPI.h>
@@ -21,6 +23,8 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <thermistor.h>
+#undef VERBOSE_SENSOR_ENABLED
+#define VERBOSE_SENSOR_ENABLED 0
 
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
@@ -55,7 +59,7 @@ static const unsigned char PROGMEM logo_bmp[] =
 static const int PROGMEM t0_a = A13;
 static const int PROGMEM t1_a = A14;
 static const int PROGMEM c0_a = A15;
-static const int PROGMEM r1_d = 5;
+static const int PROGMEM r1_d = 4;//old 5
 static const int PROGMEM r2_d = 6;
 static const int PROGMEM r3_d = 7;
 static const int PROGMEM s0_d = 24;
@@ -271,8 +275,10 @@ void poll() {
 }
 
 void relay() { // Update relay states
-  float diff = 10.0 * (_t0 - _t1); //thermocouple temp difference in ºC
+  float diff = (_t0 - _t1) / 10.0; //thermocouple temp difference in ºC
+  Serial.println("diff:"+(String)diff+"  t0: " + (String)_t0 + "  t1:" + (String)_t1);
   if (start == 0){ //program unstart
+    
     r1 = 0; // heater
     r2 = 0; // fan
     //light
@@ -284,12 +290,12 @@ void relay() { // Update relay states
   }
   else if (start == 1) { //program running
     // heater on/off with 'swing'
-    if(r1 == 0 && temp < set_temp - heat_thresh){ r1 == 1; }
-    if(r1 == 1 && temp > set_temp + heat_thresh){ r1 = 0; }
+    if(r1 == 0 && temp < set_temp - heat_thresh){ r1 = 1; Serial.println("********Hot on********");}
+    if(r1 == 1 && temp > set_temp + heat_thresh){ r1 = 0; Serial.println("********Hot off********");}
     // fan on/off with temp balance threshold
-    if(abs(diff) > fan_thresh ){ r2 = 1; }
-    else { r2 = 0; }
-    r3 = 1; // light
+    if(r2 == 0 && abs(diff) > fan_thresh ){ r2 = 1; Serial.println("********Fan on********"); }
+    if(r2 == 1 && abs(diff) < fan_thresh) { r2 = 0; Serial.println("********Fan off********");}
+    //r3 = 1; // light
   }
   else if (start == 2){ //program finished
     r1 == 0;
@@ -307,21 +313,22 @@ void relay() { // Update relay states
     r2 = 0;
     r3 = 0;
   }
-  
+  Serial.println("r1:"+(String)r1+" r2:"+(String)r2+" r3:"+(String)r3);
   //set relays
   if(r1) { digitalWrite(r1_d, HIGH); } else { digitalWrite(r1_d, LOW); }
   if(r2) { digitalWrite(r2_d, HIGH); } else { digitalWrite(r2_d, LOW); }
-  if(r3) { digitalWrite(r3_d, HIGH); } else { digitalWrite(r3_d, LOW); }
+  //if(r1) { digitalWrite(r3_d, HIGH); } else { digitalWrite(r3_d, LOW); }
+  //if(r1) { digitalWrite(4, HIGH); } else { digitalWrite(4, LOW); }
 }
 
 void printState() {
   //print state to serial
-  Serial.println("c0:"+(String)c0);
+  /*Serial.println("c0:"+(String)c0);
   Serial.println("s0:"+(String)s0+" s1:"+(String)s1+" s2:"+(String)s2+" s3:"+(String)s3);
   Serial.println("r1:"+(String)r1+" r2:"+(String)r2+" r3:"+(String)r3);
   Serial.println("temp:"+(String)temp+" set_temp:"+(String)set_temp);
   Serial.println("time:"+(String)millis()+" end_time"+(String)end_time+" run_time:"+timeString(run_time));
-  Serial.println("Status:"+statusString()+" Mode:"+ modeString());  
+  Serial.println("Status:"+statusString()+" Mode:"+ modeString()); */ 
   //print to display
   display.clearDisplay();
   display.setTextSize(2);      // Normal 1:1 pixel scale
@@ -367,6 +374,9 @@ String modeString() {
   else {return "ERR";}
 }
 
+/**
+ * Prints a user readable hash code of the status possible values returned :
+ */
 String statusString() {
   if(start == 0) {
     return "PRG";
@@ -380,6 +390,12 @@ String statusString() {
   else {return "ERR"; }
 }
 
+/**
+ * Stringifies an unsigned long representing milliseconcds to hours and minute 
+ * format
+ * @param t The time in ms
+ * @return A String of the time in HH:MM format
+ */
 String timeString(unsigned long t) {
   unsigned long sec = t/1000;
   unsigned long _hour = sec / 3600;
