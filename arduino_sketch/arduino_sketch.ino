@@ -11,7 +11,7 @@
  *  - implement ethernet
  *  - add cooling cycle features
  *  - handle clock overflow
- *  - stby, 
+ *  - add runtime max
  */
 
 #include <SPI.h>
@@ -88,8 +88,8 @@ int start = 0; // cycle state: 0=ProgSet 1=ProgRun 2=ProgFin
 int mode = 0; // input state: 0=TempSet 1=TimeSet
 float temp = 0; // ºC computed temp
 float set_temp = 50; // ºC default set temp
-float heat_thresh = 1; // ºC +- threshold for heater start/stop i.e. 'swing'
-float fan_thresh = 3; // ºC thermometer diff threshold for fan start/stop 
+float heat_thresh = 2; // ºC +- threshold for heater start/stop i.e. 'swing'
+float fan_thresh = 6; // ºC thermometer diff threshold for fan start/stop 
 unsigned long run_time = 21600000; // default runtime (6 hr)
 unsigned long inc = 300000; // inc/dec minimum time increment (5 min)
 unsigned long start_time = 0; // cycle start time
@@ -285,7 +285,7 @@ void relay() { // Update relay states
   else if (start == 1) { //program running
     // heater on/off with 'swing'
     if(r1 == 0 && temp < set_temp - heat_thresh){ r1 == 1; }
-    if(r1 == 1 && temp > set_temp + heat_thresh){ r1 = 0; }
+    else if(r1 == 1 && temp > set_temp + heat_thresh){ r1 = 0; }
     // fan on/off with temp balance threshold
     if(abs(diff) > fan_thresh ){ r2 = 1; }
     else { r2 = 0; }
@@ -308,7 +308,7 @@ void relay() { // Update relay states
     r3 = 0;
   }
   
-  //set relays
+  //set relays - if relays get mixed around change assigment here
   if(r1) { digitalWrite(r1_d, HIGH); } else { digitalWrite(r1_d, LOW); }
   if(r2) { digitalWrite(r2_d, HIGH); } else { digitalWrite(r2_d, LOW); }
   if(r3) { digitalWrite(r3_d, HIGH); } else { digitalWrite(r3_d, LOW); }
