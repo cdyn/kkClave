@@ -1,12 +1,15 @@
 /*
- * kkClave 
- *    Upcycled Yogurt incubator: assumes arduino mega 2560, relay 
+ * kkClave
+ *    Upcycled Yogurt incubator: assumes arduino mega 2560, relay
  *    shield, ethernet shield, Adafruit_SSD1306 on i2c
  * https://github.com/cdyn/kkClave
- * 
+ *
  * Jean Runnells
  * https://www.customdyn.com
- * 
+ *
+ * GNU General Public License v3.0
+ * https://github.com/cdyn/kkClave/blob/master/LICENSE
+ *
  * TODO:
  *  - implement ethernet
  *  - add cooling cycle features
@@ -21,6 +24,8 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <thermistor.h>
+#undef VERBOSE_SENSOR_ENABLED
+#define VERBOSE_SENSOR_ENABLED 0
 
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
@@ -50,12 +55,12 @@ static const unsigned char PROGMEM logo_bmp[] =
   B01111100, B11110000,
   B01110000, B01110000,
   B00000000, B00110000 };
-  
+
 //pin addresses
 static const int PROGMEM t0_a = A13;
 static const int PROGMEM t1_a = A14;
 static const int PROGMEM c0_a = A15;
-static const int PROGMEM r1_d = 5;
+static const int PROGMEM r1_d = 4;//old 5
 static const int PROGMEM r2_d = 6;
 static const int PROGMEM r3_d = 7;
 static const int PROGMEM s0_d = 24;
@@ -89,7 +94,7 @@ int mode = 0; // input state: 0=TempSet 1=TimeSet
 float temp = 0; // ºC computed temp
 float set_temp = 50; // ºC default set temp
 float heat_thresh = 2; // ºC +- threshold for heater start/stop i.e. 'swing'
-float fan_thresh = 6; // ºC thermometer diff threshold for fan start/stop 
+float fan_thresh = 6; // ºC thermometer diff threshold for fan start/stop
 unsigned long run_time = 21600000; // default runtime (6 hr)
 unsigned long inc = 300000; // inc/dec minimum time increment (5 min)
 unsigned long start_time = 0; // cycle start time
@@ -97,7 +102,7 @@ unsigned long end_time = 0; // cycle end time
 unsigned long stby = millis(); // last press for screensaver and race, if 0 device is in standby
 unsigned long race_hold = 500; // inc/dec race delay
 
-void setup() {  
+void setup() {
   //start serial
   Serial.begin(9600);
   // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
@@ -121,7 +126,7 @@ void setup() {
   // Clear the buffer
   display.clearDisplay();
   //testanimate(logo_bmp, LOGO_WIDTH, LOGO_HEIGHT);
-} 
+}
 
 void testdrawchar(void) {
   display.clearDisplay();
@@ -147,7 +152,7 @@ void stop() { // Cycle set code and cron handler
       stby = 0;
       relay();
       testanimate(logo_bmp, LOGO_WIDTH, LOGO_HEIGHT);
-    } 
+    }
   } else if ( start == 1 ){ // cycle run:  run until end_time
     if (millis() > end_time) { start = 2; }
   } else if (start == 2){ // cycle fin: lanunch screensaver after cooldown
@@ -155,10 +160,10 @@ void stop() { // Cycle set code and cron handler
       stby = 0;
       relay();
       testanimate(logo_bmp, LOGO_WIDTH, LOGO_HEIGHT);
-    } 
+    }
   }
   else {
-    
+
   }
   //delay(100); //main program delay
 }
@@ -271,8 +276,10 @@ void poll() {
 }
 
 void relay() { // Update relay states
-  float diff = 10.0 * (_t0 - _t1); //thermocouple temp difference in ºC
+  float diff = (_t0 - _t1) / 10.0; //thermocouple temp difference in ºC
+  Serial.println("diff:"+(String)diff+"  t0: " + (String)_t0 + "  t1:" + (String)_t1);
   if (start == 0){ //program unstart
+
     r1 = 0; // heater
     r2 = 0; // fan
     //light
@@ -284,12 +291,12 @@ void relay() { // Update relay states
   }
   else if (start == 1) { //program running
     // heater on/off with 'swing'
-    if(r1 == 0 && temp < set_temp - heat_thresh){ r1 == 1; }
-    else if(r1 == 1 && temp > set_temp + heat_thresh){ r1 = 0; }
+    if(r1 == 0 && temp < set_temp - heat_thresh){ r1 = 1; Serial.println("********Hot on********");}
+    if(r1 == 1 && temp > set_temp + heat_thresh){ r1 = 0; Serial.println("********Hot off********");}
     // fan on/off with temp balance threshold
-    if(abs(diff) > fan_thresh ){ r2 = 1; }
-    else { r2 = 0; }
-    r3 = 1; // light
+    if(r2 == 0 && abs(diff) > fan_thresh ){ r2 = 1; Serial.println("********Fan on********"); }
+    if(r2 == 1 && abs(diff) < fan_thresh) { r2 = 0; Serial.println("********Fan off********");}
+    //r3 = 1; // light
   }
   else if (start == 2){ //program finished
     r1 == 0;
@@ -307,21 +314,22 @@ void relay() { // Update relay states
     r2 = 0;
     r3 = 0;
   }
-  
+
   //set relays - if relays get mixed around change assigment here
   if(r1) { digitalWrite(r1_d, HIGH); } else { digitalWrite(r1_d, LOW); }
   if(r2) { digitalWrite(r2_d, HIGH); } else { digitalWrite(r2_d, LOW); }
-  if(r3) { digitalWrite(r3_d, HIGH); } else { digitalWrite(r3_d, LOW); }
+  //if(r1) { digitalWrite(r3_d, HIGH); } else { digitalWrite(r3_d, LOW); }
+  //if(r1) { digitalWrite(4, HIGH); } else { digitalWrite(4, LOW); }
 }
 
 void printState() {
   //print state to serial
-  Serial.println("c0:"+(String)c0);
+  /*Serial.println("c0:"+(String)c0);
   Serial.println("s0:"+(String)s0+" s1:"+(String)s1+" s2:"+(String)s2+" s3:"+(String)s3);
   Serial.println("r1:"+(String)r1+" r2:"+(String)r2+" r3:"+(String)r3);
   Serial.println("temp:"+(String)temp+" set_temp:"+(String)set_temp);
   Serial.println("time:"+(String)millis()+" end_time"+(String)end_time+" run_time:"+timeString(run_time));
-  Serial.println("Status:"+statusString()+" Mode:"+ modeString());  
+  Serial.println("Status:"+statusString()+" Mode:"+ modeString()); */
   //print to display
   display.clearDisplay();
   display.setTextSize(2);      // Normal 1:1 pixel scale
@@ -367,6 +375,9 @@ String modeString() {
   else {return "ERR";}
 }
 
+/**
+ * Prints a user readable hash code of the status possible values returned :
+ */
 String statusString() {
   if(start == 0) {
     return "PRG";
@@ -380,6 +391,12 @@ String statusString() {
   else {return "ERR"; }
 }
 
+/**
+ * Stringifies an unsigned long representing milliseconcds to hours and minute
+ * format
+ * @param t The time in ms
+ * @return A String of the time in HH:MM format
+ */
 String timeString(unsigned long t) {
   unsigned long sec = t/1000;
   unsigned long _hour = sec / 3600;
@@ -388,7 +405,7 @@ String timeString(unsigned long t) {
   char str[6];
   str[0] = '0' + _hour / 10;
   str[1] = '0' + _hour % 10;
-  str[2] = ':'; 
+  str[2] = ':';
   str[3] = '0' + _min / 10;
   str[4] = '0' + _min % 10;
   str[5] = '\0';
