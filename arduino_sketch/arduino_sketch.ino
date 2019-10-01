@@ -10,11 +10,12 @@
  * GNU General Public License v3.0
  * https://github.com/cdyn/kkClave/blob/master/LICENSE
  *
- * TODO:
+ * @todo
  *  - implement ethernet
  *  - add cooling cycle features
  *  - handle clock overflow
  *  - add runtime max
+ *  - workaround verbose thermistor
  */
 
 #include <SPI.h>
@@ -24,20 +25,21 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <thermistor.h>
-#undef VERBOSE_SENSOR_ENABLED
+
+// Override verbose serial output from thermistor library
+#ifdef VERBOSE_SENSOR_ENABLED 
+#undef VERBOSE_SENSOR_ENABLED 
 #define VERBOSE_SENSOR_ENABLED 0
+#endif
 
-#define SCREEN_WIDTH 128 // OLED display width, in pixels
-#define SCREEN_HEIGHT 64 // OLED display height, in pixels
-
-// Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
-#define OLED_RESET     22 // Reset pin # (4)(or -1 if sharing Arduino reset pin)
+// Declarations for an SSD1306 display connected to I2C (SDA, SCL pins) 
+#define SCREEN_WIDTH 128 ///< OLED display width, in pixels
+#define SCREEN_HEIGHT 64 ///< OLED display height, in pixels
+#define OLED_RESET 22 ///< Reset pin # (4)(or -1 if sharing Arduino reset pin)
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
-
-#define NUMFLAKES     10 // Number of snowflakes in the animation example
-
-#define LOGO_HEIGHT   16
-#define LOGO_WIDTH    16
+#define NUMFLAKES     10 ///< Number of snowflakes in the animation example
+#define LOGO_HEIGHT   16 ///< Animation logo height
+#define LOGO_WIDTH    16 ///< Animation logo width
 static const unsigned char PROGMEM logo_bmp[] =
 { B00000000, B11000000,
   B00000001, B11000000,
@@ -77,31 +79,34 @@ THERMISTOR t1(t1_a,        // Analog pin
               10000,       // Nominal resistance at 25 ºC
               3950,        // thermistor's beta coefficient
               10000);      // Value of the series resistor
-int _t0 = 0; //themistor0 1/10 ºC
-int _t1 = 0; //themistor1 1/10 ºC
-int c0 = 0; //potentiometer (unused)
-int s0 = 0; //start
-int s1 = 0; //mode
-int s2 = 0; //add
-int s3 = 0; //dec
-bool r1 = 0; //light
-bool r2 = 0; //fan
-bool r3 = 0; //heater
+int _t0 = 0; ///< themistor0 1/10 ºC
+int _t1 = 0; ///< themistor1 1/10 ºC
+int c0 = 0; ///< potentiometer (unused)
+int s0 = 0; ///< start button
+int s1 = 0; ///< mode button
+int s2 = 0; ///< add button
+int s3 = 0; ///< dec button
+bool r1 = 0; ///< heater relay
+bool r2 = 0; ///< fan realy
+bool r3 = 0; ///< light realy
 
 //LOGIC vars
-int start = 0; // cycle state: 0=ProgSet 1=ProgRun 2=ProgFin
-int mode = 0; // input state: 0=TempSet 1=TimeSet
-float temp = 0; // ºC computed temp
-float set_temp = 50; // ºC default set temp
-float heat_thresh = 2; // ºC +- threshold for heater start/stop i.e. 'swing'
-float fan_thresh = 6; // ºC thermometer diff threshold for fan start/stop
-unsigned long run_time = 21600000; // default runtime (6 hr)
-unsigned long inc = 300000; // inc/dec minimum time increment (5 min)
-unsigned long start_time = 0; // cycle start time
-unsigned long end_time = 0; // cycle end time
-unsigned long stby = millis(); // last press for screensaver and race, if 0 device is in standby
-unsigned long race_hold = 500; // inc/dec race delay
+int start = 0; ///< cycle state: 0=ProgSet 1=ProgRun 2=ProgFin
+int mode = 0; ///< input state: 0=TempSet 1=TimeSet
+float temp = 0; ///< ºC computed temp
+float set_temp = 50; ///< ºC default set temp
+float heat_thresh = 2; ///< ºC +- threshold for heater start/stop i.e. 'swing'
+float fan_thresh = 6; ///< ºC thermometer diff threshold for fan start/stop
+unsigned long run_time = 21600000; ///< default runtime (6 hr)
+unsigned long inc = 300000; ///< inc/dec minimum time increment (5 min)
+unsigned long start_time = 0; ///< cycle start time
+unsigned long end_time = 0; ///< cycle end time
+unsigned long stby = millis(); ///< last press for screensaver and race, if 0 device is in standby
+unsigned long race_hold = 500; ///< inc/dec race delay
 
+/**
+ * Arduino init
+ */
 void setup() {
   //start serial
   Serial.begin(9600);
@@ -128,24 +133,9 @@ void setup() {
   //testanimate(logo_bmp, LOGO_WIDTH, LOGO_HEIGHT);
 }
 
-void testdrawchar(void) {
-  display.clearDisplay();
-  display.setTextSize(1);      // Normal 1:1 pixel scale
-  display.setTextColor(WHITE); // Draw white text
-  display.setCursor(0, 0);     // Start at top-left corner
-  display.cp437(true);         // Use full 256 char 'Code Page 437' font
-
-  // Not all the characters will fit on the display. This is normal.
-  // Library will draw what it can and the rest will be clipped.
-  for(int16_t i=0; i<256; i++) {
-    if(i == '\n') display.write(' ');
-    else          display.write(i);
-  }
-
-  display.display();
-  delay(2000);
-}
-
+/**
+ * Cycle set and chron handler, launches screen saver
+ */
 void stop() { // Cycle set code and cron handler
   if ( start == 0 ) { // cycle start: launch screen saver after delay
     if(millis() > stby + 300000){ // screen saver delay (5 min)
@@ -165,9 +155,12 @@ void stop() { // Cycle set code and cron handler
   else {
 
   }
-  //delay(100); //main program delay
+  //delay(100); //uncomment to slow down serial output
 }
 
+/**
+ * Poll sensors and buttons, do any resultant calculations
+ */
 void poll() {
   //read sensors
   c0 =  analogRead(c0_a);
@@ -275,6 +268,9 @@ void poll() {
   }
 }
 
+/**
+ * Change relay states based on cycle status and sensor feedback
+ */
 void relay() { // Update relay states
   float diff = (_t0 - _t1) / 10.0; //thermocouple temp difference in ºC
   Serial.println("diff:"+(String)diff+"  t0: " + (String)_t0 + "  t1:" + (String)_t1);
@@ -322,6 +318,9 @@ void relay() { // Update relay states
   //if(r1) { digitalWrite(4, HIGH); } else { digitalWrite(4, LOW); }
 }
 
+/**
+ * Prints the current state to display and serial
+ */
 void printState() {
   //print state to serial
   /*Serial.println("c0:"+(String)c0);
@@ -352,6 +351,11 @@ void printState() {
   display.display();
 }
 
+/**
+ * Returns a user readable string regrading the mode based on cycle state: temp/time based 
+ * on mode and set/adujust based on cycle state
+ * @retrun the current input mode
+ */
 String modeString() {
     if(start == 0) {
       if(mode == 0) {
@@ -376,7 +380,8 @@ String modeString() {
 }
 
 /**
- * Prints a user readable hash code of the status possible values returned :
+ * Prints a user readable hash code of the cycle status possible values returned
+ * @return cycle status string
  */
 String statusString() {
   if(start == 0) {
@@ -392,8 +397,7 @@ String statusString() {
 }
 
 /**
- * Stringifies an unsigned long representing milliseconcds to hours and minute
- * format
+ * Stringifies an unsigned long representing milliseconcds to hours and minute format
  * @param t The time in ms
  * @return A String of the time in HH:MM format
  */
@@ -412,9 +416,14 @@ String timeString(unsigned long t) {
   return (String)str;
 }
 
-#define XPOS   0 // Indexes into the 'icons' array in function below
-#define YPOS   1
-#define DELTAY 2
+/**
+ * This function will render a screen saver and call poll() to check for a button press this is a 
+ * modified version of the adafruit sample function 
+ * 
+ * @param bitmap a bit map of the icon to be rendered, use logo_bmp
+ * @param w logo width, use LOGO_WIDTH
+ * @param h logo height, use LOGO_HEIGHT
+ */
 void testanimate(const uint8_t *bitmap, uint8_t w, uint8_t h) {
   int8_t f, icons[NUMFLAKES][3];
 
@@ -456,7 +465,13 @@ void testanimate(const uint8_t *bitmap, uint8_t w, uint8_t h) {
     }
   }
 }
-
+/**
+ * Main program loop that calls the main program directives in turn 
+ * @see stop()
+ * @see poll()
+ * @see relay()
+ * @see printState()
+ */
 void loop() {
   //main program loop
   stop();
