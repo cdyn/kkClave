@@ -40,6 +40,9 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 #define NUMFLAKES     10 ///< Number of snowflakes in the animation example
 #define LOGO_HEIGHT   16 ///< Animation logo height
 #define LOGO_WIDTH    16 ///< Animation logo width
+#define XPOS   0
+#define YPOS   1
+#define DELTAY 2
 static const unsigned char PROGMEM logo_bmp[] =
 { B00000000, B11000000,
   B00000001, B11000000,
@@ -323,12 +326,12 @@ void relay() { // Update relay states
  */
 void printState() {
   //print state to serial
-  /*Serial.println("c0:"+(String)c0);
+  Serial.println("c0:"+(String)c0);
   Serial.println("s0:"+(String)s0+" s1:"+(String)s1+" s2:"+(String)s2+" s3:"+(String)s3);
   Serial.println("r1:"+(String)r1+" r2:"+(String)r2+" r3:"+(String)r3);
   Serial.println("temp:"+(String)temp+" set_temp:"+(String)set_temp);
   Serial.println("time:"+(String)millis()+" end_time"+(String)end_time+" run_time:"+timeString(run_time));
-  Serial.println("Status:"+statusString()+" Mode:"+ modeString()); */
+  Serial.println("Status:"+statusString()+" Mode:"+ modeString()); 
   //print to display
   display.clearDisplay();
   display.setTextSize(2);      // Normal 1:1 pixel scale
